@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Gestión de Planta - Producción & Materia Prima</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Font Awesome CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Firebase v10 Compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <!-- QRCode.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+    .pulse-glow-green { animation: glow-green 2s infinite; }
+    @keyframes glow-green {
+      0%, 100% { box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
+      50% { box-shadow: 0 0 25px rgba(34, 197, 94, 0.8); }
+    }
+
+    .pulse-glow-amber { animation: glow-amber 2s infinite; }
+    @keyframes glow-amber {
+      0%, 100% { box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); }
+      50% { box-shadow: 0 0 25px rgba(245, 158, 11, 0.8); }
+    }
+
+    .industrial-pattern {
+      background-color: #0f172a;
+      background-image: radial-gradient(#1e293b 1px, transparent 1px);
+      background-size: 16px 16px;
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col industrial-pattern antialiased select-none">
+
+  <header class="bg-slate-900/90 border-b border-slate-800 sticky top-0 z-30 backdrop-blur-md px-4 py-3 shadow-xl">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      
+      <div class="flex items-center space-x-3">
+        <div class="bg-amber-500 text-slate-950 p-2.5 rounded-xl font-black flex items-center justify-center shadow-lg shadow-amber-500/20">
+          <i class="fa-solid font-black fa-industry text-xl"></i>
+        </div>
+        <div>
+          <h1 class="text-lg md:text-xl font-black tracking-wider text-slate-100 uppercase flex items-center gap-2">
+            CONTROL DE PLANTA
+            <span class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 text-amber-400 border border-amber-500/30">REALTIME</span>
+          </h1>
+          <p class="text-xs text-slate-400 font-medium">Conexión Producción &bull; Materia Prima</p>
+        </div>
+      </div>
+
+      <div class="flex items-center flex-wrap gap-2">
+        <div id="status-badge" class="px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all duration-300">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
+          <span id="status-text">Conectando a Firebase...</span>
+        </div>
+
+        <button onclick="openRulesModal()" class="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-book-bookmark text-amber-400"></i>
+          <span>Guía Reglas Firebase</span>
+        </button>
+
+        <button onclick="openQrModal()" class="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 font-black flex items-center gap-1.5 transition shadow-lg shadow-amber-500/10">
+          <i class="fa-solid fa-qrcode"></i>
+          <span>Código QR</span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <nav class="bg-slate-900 border-b border-slate-800 px-4">
+    <div class="max-w-7xl mx-auto flex space-x-2 overflow-x-auto py-2">
+      <button id="tab-btn-produccion" onclick="switchTab('produccion')" class="px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20">
+        <i class="fa-solid fa-gears"></i>
+        <span>SECTOR PRODUCCIÓN</span>
+      </button>
+      
+      <button id="tab-btn-materiaprima" onclick="switchTab('materiaprima')" class="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-400 hover:text-slate-100 hover:bg-slate-800 flex items-center gap-2 transition relative">
+        <i class="fa-solid fa-boxes-stacked"></i>
+        <span>SECTOR MATERIA PRIMA</span>
+        <span id="pending-counter" class="hidden bg-rose-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">0</span>
+      </button>
+    </div>
+  </nav>
+
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 overflow-y-auto">
+
+    <section id="sector-produccion" class="space-y-6">
+      
+      <div id="line-selection-view" class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-extrabold text-slate-100 flex items-center gap-2">
+              <i class="fa-solid fa-network-wired text-amber-500"></i>
+              Seleccione la Línea de Producción
+            </h2>
+            <p class="text-sm text-slate-400">Elija su estación de trabajo para emitir solicitudes en vivo.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          <button onclick="selectLine('L1')" class="group bg-slate-900/80 hover:bg-amber-500 border border-slate-800 hover:border-amber-400 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 transition-all duration-200 transform hover:-translate-y-1 shadow-lg">
+            <div class="w-14 h-14 rounded-full bg-slate-800 group-hover:bg-slate-950 text-amber-400 flex items-center justify-center font-black text-2xl transition">L1</div>
+            <span class="text-sm font-extrabold text-slate-200 group-hover:text-slate-950 uppercase tracking-wider">Línea L1</span>
+            <span id="count-L1" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-semibold">0 activas</span>
+          </button>
+
+          <button onclick="selectLine('L31')" class="group bg-slate-900/80 hover:bg-amber-500 border border-slate-800 hover:border-amber-400 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 transition-all duration-200 transform hover:-translate-y-1 shadow-lg">
+            <div class="w-14 h-14 rounded-full bg-slate-800 group-hover:bg-slate-950 text-amber-400 flex items-center justify-center font-black text-2xl transition">L31</div>
+            <span class="text-sm font-extrabold text-slate-200 group-hover:text-slate-950 uppercase tracking-wider">Línea L31</span>
+            <span id="count-L31" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-semibold">0 activas</span>
+          </button>
+
+          <button onclick="selectLine('L6')" class="group bg-slate-900/80 hover:bg-amber-500 border border-slate-800 hover:border-amber-400 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 transition-all duration-200 transform hover:-translate-y-1 shadow-lg">
+            <div class="w-14 h-14 rounded-full bg-slate-800 group-hover:bg-slate-950 text-amber-400 flex items-center justify-center font-black text-2xl transition">L6</div>
+            <span class="text-sm font-extrabold text-slate-200 group-hover:text-slate-950 uppercase tracking-wider">Línea L6</span>
+            <span id="count-L6" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-semibold">0 activas</span>
+          </button>
+
+          <button onclick="selectLine('L7')" class="group bg-slate-900/80 hover:bg-amber-500 border border-slate-800 hover:border-amber-400 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 transition-all duration-200 transform hover:-translate-y-1 shadow-lg">
+            <div class="w-14 h-14 rounded-full bg-slate-800 group-hover:bg-slate-950 text-amber-400 flex items-center justify-center font-black text-2xl transition">L7</div>
+            <span class="text-sm font-extrabold text-slate-200 group-hover:text-slate-950 uppercase tracking-wider">Línea L7</span>
+            <span id="count-L7" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-semibold">0 activas</span>
+          </button>
+
+          <button onclick="selectLine('L71')" class="group bg-slate-900/80 hover:bg-amber-500 border border-slate-800 hover:border-amber-400 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 transition-all duration-200 transform hover:-translate-y-1 shadow-lg">
+            <div class="w-14 h-14 rounded-full bg-slate-800 group-hover:bg-slate-950 text-amber-400 flex items-center justify-center font-black text-2xl transition">L71</div>
+            <span class="text-sm font-extrabold text-slate-200 group-hover:text-slate-950 uppercase tracking-wider">Línea L71</span>
+            <span id="count-L71" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-semibold">0 activas</span>
+          </button>
+
+          <button onclick="selectLine('L41')" class="group bg-slate-900/80 hover:bg-amber-500 border border-slate-800 hover:border-amber-400 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 transition-all duration-200 transform hover:-translate-y-1 shadow-lg">
+            <div class="w-14 h-14 rounded-full bg-slate-800 group-hover:bg-slate-950 text-amber-400 flex items-center justify-center font-black text-2xl transition">L41</div>
+            <span class="text-sm font-extrabold text-slate-200 group-hover:text-slate-950 uppercase tracking-wider">Línea L41</span>
+            <span id="count-L41" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-semibold">0 activas</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="active-line-workspace" class="hidden space-y-6">
+        
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 md:p-6 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+          <div class="flex items-center gap-4">
+            <button onclick="deselectLine()" class="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition">
+              <i class="fa-solid fa-arrow-left"></i>
+            </button>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-amber-400">Línea Activa</span>
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              </div>
+              <h2 id="active-line-title" class="text-2xl md:text-3xl font-black text-slate-100">LÍNEA L1</h2>
+            </div>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <label class="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-bolt text-amber-400"></i>
+            Presets de Solicitud Rápida
+          </label>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <button onclick="selectPreset('Material rechazado, se necesita materia prima')" class="preset-btn group bg-slate-900 border-2 border-slate-800 hover:border-red-500 rounded-2xl p-4 text-left transition flex items-start gap-3.5 shadow-md">
+              <div class="p-3 bg-red-500/10 text-red-400 rounded-xl group-hover:bg-red-500 group-hover:text-slate-950 transition">
+                <i class="fa-solid fa-circle-xmark text-xl"></i>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-100 group-hover:text-red-400 text-sm transition">1. Material Rechazado</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Se necesita materia prima.</p>
+              </div>
+            </button>
+
+            <button onclick="selectPreset('Falta siliconado/poly')" class="preset-btn group bg-slate-900 border-2 border-slate-800 hover:border-amber-500 rounded-2xl p-4 text-left transition flex items-start gap-3.5 shadow-md">
+              <div class="p-3 bg-amber-500/10 text-amber-400 rounded-xl group-hover:bg-amber-500 group-hover:text-slate-950 transition">
+                <i class="fa-solid fa-scroll text-xl"></i>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-100 group-hover:text-amber-400 text-sm transition">2. Falta Siliconado / Poly</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Suministro de papel o film.</p>
+              </div>
+            </button>
+
+            <button onclick="selectPreset('Falta Bolsas cristal/empaques')" class="preset-btn group bg-slate-900 border-2 border-slate-800 hover:border-blue-500 rounded-2xl p-4 text-left transition flex items-start gap-3.5 shadow-md">
+              <div class="p-3 bg-blue-500/10 text-blue-400 rounded-xl group-hover:bg-blue-500 group-hover:text-slate-950 transition">
+                <i class="fa-solid fa-box text-xl"></i>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-100 group-hover:text-blue-400 text-sm transition">3. Falta Bolsas Cristal / Empaques</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Insumos de empaquetado.</p>
+              </div>
+            </button>
+
+            <button onclick="selectPreset('Falta generales de línea')" class="preset-btn group bg-slate-900 border-2 border-slate-800 hover:border-purple-500 rounded-2xl p-4 text-left transition flex items-start gap-3.5 shadow-md">
+              <div class="p-3 bg-purple-500/10 text-purple-400 rounded-xl group-hover:bg-purple-500 group-hover:text-slate-950 transition">
+                <i class="fa-solid fa-wrench text-xl"></i>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-100 group-hover:text-purple-400 text-sm transition">4. Generales de Línea</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Herramientas o insumos de puesto.</p>
+              </div>
+            </button>
+
+            <button onclick="selectPreset('Se necesita abastecedor en línea')" class="preset-btn group bg-slate-900 border-2 border-slate-800 hover:border-emerald-500 rounded-2xl p-4 text-left transition flex items-start gap-3.5 shadow-md md:col-span-2 lg:col-span-2">
+              <div class="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl group-hover:bg-emerald-500 group-hover:text-slate-950 transition">
+                <i class="fa-solid fa-truck-ramp-box text-xl"></i>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-slate-100 group-hover:text-emerald-400 text-sm transition">5. Se Necesita Abastecedor</h3>
+                <p class="text-xs text-slate-400 mt-0.5">Asistencia presencial urgente en línea.</p>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-6 space-y-4 shadow-xl">
+          <div class="space-y-1">
+            <label for="custom-note" class="text-xs font-bold uppercase tracking-wider text-slate-300">Mensaje o Observación Opcional</label>
+            <input type="text" id="custom-note" placeholder="Ej: Urgente bobina ancho 45cm..." class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition text-sm">
+          </div>
+
+          <div class="flex items-center justify-between gap-4 pt-2">
+            <div class="text-xs text-slate-400 flex items-center gap-1.5">
+              <i class="fa-solid fa-circle-info text-amber-400"></i>
+              <span id="selected-preset-summary" class="font-semibold text-slate-300">Seleccione un preset arriba</span>
+            </div>
+
+            <button onclick="sendOrder()" id="btn-send-order" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black px-8 py-3.5 rounded-xl transition shadow-lg shadow-amber-500/20 flex items-center gap-2 transform active:scale-95 text-sm uppercase tracking-wider">
+              <i class="fa-solid fa-paper-plane"></i>
+              <span>Enviar Solicitud</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+            <span class="flex items-center gap-2">
+              <i class="fa-solid fa-clock-rotate-left text-amber-400"></i>
+              Historial en Vivo - <span id="history-line-name" class="text-amber-400">L1</span>
+            </span>
+            <span id="line-history-count" class="text-xs px-2 py-0.5 bg-slate-800 text-slate-400 rounded-full font-medium">0 solicitudes</span>
+          </h3>
+
+          <div id="line-history-container" class="space-y-3">
+            <div class="text-center py-8 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800/80">
+              <i class="fa-solid fa-inbox text-3xl mb-2 text-slate-600"></i>
+              <p class="text-sm">No hay solicitudes registradas para esta línea.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+    <section id="sector-materiaprima" class="hidden space-y-6">
+      
+      <div id="mp-auth-container" class="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 text-center shadow-2xl">
+        <div class="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20 mx-auto flex items-center justify-center text-2xl">
+          <i class="fa-solid fa-lock"></i>
+        </div>
+
+        <div>
+          <h2 class="text-xl font-extrabold text-slate-100">Acceso Protegido</h2>
+          <p class="text-xs text-slate-400 mt-1">Ingrese la clave de seguridad para ingresar al Sector Materia Prima</p>
+        </div>
+
+        <div class="flex justify-center space-x-3 my-4">
+          <input type="password" id="mp-pin-input" readonly maxlength="4" placeholder="••••" class="w-48 text-center text-3xl font-black tracking-widest bg-slate-950 border border-slate-700 rounded-xl py-3 text-amber-400 focus:outline-none">
+        </div>
+
+        <div id="mp-auth-error" class="text-xs font-semibold text-rose-400 hidden">
+          <i class="fa-solid fa-triangle-exclamation mr-1"></i> Clave incorrecta. Intente nuevamente.
+        </div>
+
+        <div class="grid grid-cols-3 gap-2.5 max-w-xs mx-auto">
+          <button onclick="pressPin('1')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">1</button>
+          <button onclick="pressPin('2')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">2</button>
+          <button onclick="pressPin('3')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">3</button>
+
+          <button onclick="pressPin('4')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">4</button>
+          <button onclick="pressPin('5')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">5</button>
+          <button onclick="pressPin('6')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">6</button>
+
+          <button onclick="pressPin('7')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">7</button>
+          <button onclick="pressPin('8')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">8</button>
+          <button onclick="pressPin('9')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">9</button>
+
+          <button onclick="clearPin()" class="py-3 bg-slate-800/60 hover:bg-slate-800 text-rose-400 font-bold rounded-xl transition text-sm">Borrar</button>
+          <button onclick="pressPin('0')" class="py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xl font-bold rounded-xl transition">0</button>
+          <button onclick="verifyPin()" class="py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl transition flex items-center justify-center">
+            <i class="fa-solid fa-key"></i>
+          </button>
+        </div>
+      </div>
+
+      <div id="mp-panel-container" class="hidden space-y-6">
+        
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-6 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-bold uppercase">Sesión Autorizada</span>
+              <span class="text-xs text-slate-400">&bull; Panel de Despacho</span>
+            </div>
+            <h2 class="text-2xl font-black text-slate-100 mt-1 flex items-center gap-2">
+              <i class="fa-solid fa-boxes-stacked text-amber-500"></i>
+              Panel de Control de Materia Prima
+            </h2>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button onclick="testAudioAlert()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold flex items-center gap-2 border border-slate-700 transition">
+              <i class="fa-solid fa-bell"></i>
+              <span>Probar Sonido</span>
+            </button>
+
+            <button onclick="lockMpPanel()" class="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-bold flex items-center gap-1.5 border border-rose-500/30 transition">
+              <i class="fa-solid fa-lock"></i>
+              <span>Bloquear</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+          
+          <div class="flex items-center space-x-1 overflow-x-auto w-full md:w-auto">
+            <button onclick="setMpFilter('all')" id="filter-all" class="mp-filter-btn px-3.5 py-2 rounded-xl text-xs font-bold transition bg-amber-500 text-slate-950 shadow">
+              Todos (<span id="mp-count-all">0</span>)
+            </button>
+            <button onclick="setMpFilter('Pendiente')" id="filter-Pendiente" class="mp-filter-btn px-3.5 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition">
+              ⏳ Pendientes (<span id="mp-count-pending">0</span>)
+            </button>
+            <button onclick="setMpFilter('En Camino')" id="filter-En Camino" class="mp-filter-btn px-3.5 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition">
+              🚚 En Camino
+            </button>
+            <button onclick="setMpFilter('Entregado')" id="filter-Entregado" class="mp-filter-btn px-3.5 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition">
+              ✅ Entregados
+            </button>
+            <button onclick="setMpFilter('Rechazado')" id="filter-Rechazado" class="mp-filter-btn px-3.5 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition">
+              ❌ Rechazados
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2 w-full md:w-auto">
+            <label class="text-xs text-slate-400 font-bold uppercase">Filtrar Línea:</label>
+            <select id="mp-line-select" onchange="renderMpOrders()" class="bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-amber-500">
+              <option value="ALL">Todas las líneas</option>
+              <option value="L1">Línea L1</option>
+              <option value="L31">Línea L31</option>
+              <option value="L6">Línea L6</option>
+              <option value="L7">Línea L7</option>
+              <option value="L71">Línea L71</option>
+              <option value="L41">Línea L41</option>
+            </select>
+          </div>
+
+        </div>
+
+        <div id="mp-orders-list" class="space-y-4">
+          <div class="text-center py-12 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800">
+            <i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-amber-500"></i>
+            <p class="text-sm font-medium">Cargando solicitudes en tiempo real...</p>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <div id="rules-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-6 shadow-2xl relative">
+      
+      <button onclick="closeRulesModal()" class="absolute top-5 right-5 text-slate-400 hover:text-slate-100 w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center transition">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <div class="flex items-center space-x-3">
+        <div class="p-3 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20">
+          <i class="fa-solid fa-shield-halved text-2xl"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-extrabold text-slate-100">Guía de Configuración de Reglas Firestore</h3>
+          <p class="text-xs text-slate-400">Instrucciones para activar el modo tiempo real sin restricciones de permisos.</p>
+        </div>
+      </div>
+
+      <div class="space-y-4 text-xs text-slate-300 leading-relaxed">
+        <p>Si la aplicación muestra <span class="text-rose-400 font-bold">🔴 Error de Permisos</span>, pega estas reglas en tu consola de Firebase para habilitar sincronización en tiempo real entre múltiples pantallas:</p>
+
+        <ol class="space-y-2 list-decimal list-inside bg-slate-950 p-4 rounded-2xl border border-slate-800">
+          <li>Ingresa a la <a href="https://console.firebase.google.com/" target="_blank" class="text-amber-400 underline font-semibold">Consola de Firebase</a>.</li>
+          <li>Selecciona tu proyecto: <strong class="text-slate-100">materiaprima-7df61</strong>.</li>
+          <li>Ve a <strong class="text-slate-100">Firestore Database</strong> &rarr; Pestaña <strong class="text-slate-100">Reglas (Rules)</strong>.</li>
+          <li>Copia e introduce las siguientes reglas:</li>
+        </ol>
+
+        <div class="relative bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[11px] text-amber-300">
+          <pre class="overflow-x-auto">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</pre>
+          <button onclick="copyRulesSnippet()" class="absolute top-3 right-3 bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-[10px] font-sans font-bold flex items-center gap-1">
+            <i class="fa-solid fa-copy"></i> Copiar
+          </button>
+        </div>
+      </div>
+
+      <div class="pt-2 flex justify-end">
+        <button onclick="closeRulesModal()" class="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider transition">
+          Entendido
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="qr-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 text-center space-y-5 shadow-2xl relative">
+      <button onclick="closeQrModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-100 w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center transition">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+
+      <div>
+        <h3 class="text-lg font-black text-slate-100">Código QR de la App</h3>
+        <p class="text-xs text-slate-400 mt-1">Escanea para acceder directamente desde tablets o teléfonos de la planta.</p>
+      </div>
+
+      <div class="bg-white p-4 rounded-2xl inline-block shadow-inner mx-auto">
+        <div id="qrcode-canvas" class="flex justify-center"></div>
+      </div>
+
+      <div class="space-y-2">
+        <input type="text" id="qr-url-display" readonly class="w-full bg-slate-950 border border-slate-700 text-slate-400 text-[11px] rounded-xl px-3 py-2 text-center select-all">
+        <button onclick="copyAppUrl()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-link text-amber-400"></i>
+          <span>Copiar Enlace</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCf5FkrH79OSxlaJ2Gk07QG7Dzg2XQ4A_Y",
+      authDomain: "materiaprima-7df61.firebaseapp.com",
+      projectId: "materiaprima-7df61",
+      storageBucket: "materiaprima-7df61.firebasestorage.app",
+      messagingSenderId: "568344749279",
+      appId: "1:568344749279:web:92d0051918b129c87a356a",
+      measurementId: "G-10Z6DHWSJH"
+    };
+
+    let db = null;
+    let isConnected = false;
+    let allOrders = [];
+    let selectedLine = null;
+    let selectedPreset = '';
+    let currentTab = 'produccion';
+    let isMpUnlocked = false;
+    let mpFilter = 'all';
+    let pinInputVal = '';
+    const MP_CORRECT_PIN = '9876';
+    let prevOrdersCount = 0;
+    let initialLoadComplete = false;
+
+    function initFirebase() {
+      try {
+        if (!firebase.apps.length) {
+          firebase.initializeApp(firebaseConfig);
+        }
+        db = firebase.firestore();
+        listenToOrders();
+      } catch (err) {
+        console.error("Error initializing Firebase:", err);
+        updateStatusIndicator('error', 'Error de Configuración');
+        useFallbackLocalStorage();
+      }
+    }
+
+    function listenToOrders() {
+      if (!db) return;
+
+      db.collection('pedidos')
+        .onSnapshot(
+          (snapshot) => {
+            updateStatusIndicator('connected', 'Conectado en Vivo');
+            
+            const orders = [];
+            snapshot.forEach((doc) => {
+              orders.push({ id: doc.id, ...doc.data() });
+            });
+
+            orders.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+            if (initialLoadComplete && isMpUnlocked && orders.length > prevOrdersCount) {
+              const newest = orders[0];
+              if (newest && newest.status === 'Pendiente') {
+                playFactoryAlert();
+              }
+            }
+
+            prevOrdersCount = orders.length;
+            initialLoadComplete = true;
+
+            allOrders = orders;
+            updateUI();
+          },
+          (error) => {
+            console.error("Firestore error:", error);
+            if (error.code === 'permission-denied') {
+              updateStatusIndicator('error', 'Error de Permisos');
+            } else {
+              updateStatusIndicator('error', 'Sin Conexión');
+            }
+            useFallbackLocalStorage();
+          }
+        );
+    }
+
+    function useFallbackLocalStorage() {
+      const saved = localStorage.getItem('factory_pedidos_fallback');
+      if (saved) {
+        try { allOrders = JSON.parse(saved); } catch(e) { allOrders = []; }
+      }
+      updateUI();
+    }
+
+    function saveFallbackData() {
+      localStorage.setItem('factory_pedidos_fallback', JSON.stringify(allOrders));
+    }
+
+    function updateStatusIndicator(status, text) {
+      const badge = document.getElementById('status-badge');
+
+      if (status === 'connected') {
+        badge.className = "px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 pulse-glow-green";
+        badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span><span>🟢 Conectado en Vivo</span>`;
+        isConnected = true;
+      } else if (status === 'error') {
+        badge.className = "px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 bg-rose-500/20 text-rose-400 border border-rose-500/30";
+        badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span><span>🔴 ${text}</span>`;
+        isConnected = false;
+      } else {
+        badge.className = "px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 bg-amber-500/20 text-amber-400 border border-amber-500/30 pulse-glow-amber";
+        badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span><span>🟡 ${text}</span>`;
+        isConnected = false;
+      }
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      const btnProd = document.getElementById('tab-btn-produccion');
+      const btnMp = document.getElementById('tab-btn-materiaprima');
+      const secProd = document.getElementById('sector-produccion');
+      const secMp = document.getElementById('sector-materiaprima');
+
+      if (tab === 'produccion') {
+        btnProd.className = "px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20";
+        btnMp.className = "px-5 py-2.5 rounded-xl text-sm font-bold text-slate-400 hover:text-slate-100 hover:bg-slate-800 flex items-center gap-2 transition relative";
+        secProd.classList.remove('hidden');
+        secMp.classList.add('hidden');
+      } else {
+        btnMp.className = "px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 relative";
+        btnProd.className = "px-5 py-2.5 rounded-xl text-sm font-bold text-slate-400 hover:text-slate-100 hover:bg-slate-800 flex items-center gap-2 transition";
+        secMp.classList.remove('hidden');
+        secProd.classList.add('hidden');
+      }
+    }
+
+    function selectLine(line) {
+      selectedLine = line;
+      document.getElementById('line-selection-view').classList.add('hidden');
+      document.getElementById('active-line-workspace').classList.remove('hidden');
+      document.getElementById('active-line-title').innerText = `LÍNEA ${line}`;
+      document.getElementById('history-line-name').innerText = line;
+      renderLineHistory();
+    }
+
+    function deselectLine() {
+      selectedLine = null;
+      document.getElementById('line-selection-view').classList.remove('hidden');
+      document.getElementById('active-line-workspace').classList.add('hidden');
+    }
+
+    function selectPreset(presetText) {
+      selectedPreset = presetText;
+      document.getElementById('selected-preset-summary').innerText = `Preset: "${presetText}"`;
+      
+      document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.classList.remove('ring-2', 'ring-amber-400', 'bg-slate-800');
+      });
+      event.currentTarget.classList.add('ring-2', 'ring-amber-400', 'bg-slate-800');
+    }
+
+    function sendOrder() {
+      if (!selectedLine) {
+        showToast("Seleccione una línea de producción.", "error");
+        return;
+      }
+      if (!selectedPreset) {
+        showToast("Seleccione un preset de la lista.", "warning");
+        return;
+      }
+
+      const note = document.getElementById('custom-note').value.trim();
+      const newOrder = {
+        linea: selectedLine,
+        preset: selectedPreset,
+        nota: note,
+        status: 'Pendiente',
+        respuesta: '',
+        timestamp: Date.now(),
+        fechaStr: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      const btn = document.getElementById('btn-send-order');
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>Enviando...</span>`;
+
+      if (db && isConnected) {
+        db.collection('pedidos').add(newOrder)
+          .then(() => {
+            showToast("🚀 Solicitud enviada a Materia Prima", "success");
+            resetForm();
+          })
+          .catch((err) => {
+            console.error("Error saving order:", err);
+            newOrder.id = 'local_' + Date.now();
+            allOrders.unshift(newOrder);
+            saveFallbackData();
+            updateUI();
+            resetForm();
+            showToast("Guardado en modo local", "warning");
+          })
+          .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-paper-plane"></i><span>Enviar Solicitud</span>`;
+          });
+      } else {
+        newOrder.id = 'local_' + Date.now();
+        allOrders.unshift(newOrder);
+        saveFallbackData();
+        updateUI();
+        resetForm();
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-paper-plane"></i><span>Enviar Solicitud</span>`;
+        showToast("🚀 Solicitud registrada (Modo Offline)", "success");
+      }
+    }
+
+    function resetForm() {
+      document.getElementById('custom-note').value = '';
+      selectedPreset = '';
+      document.getElementById('selected-preset-summary').innerText = 'Seleccione un preset arriba';
+      document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.classList.remove('ring-2', 'ring-amber-400', 'bg-slate-800');
+      });
+    }
+
+    function updateUI() {
+      updateLineCounters();
+      if (selectedLine) {
+        renderLineHistory();
+      }
+      if (isMpUnlocked) {
+        renderMpOrders();
+      }
+      updatePendingBadge();
+    }
+
+    function updateLineCounters() {
+      const lines = ['L1', 'L31', 'L6', 'L7', 'L71', 'L41'];
+      lines.forEach(l => {
+        const count = allOrders.filter(o => o.linea === l && o.status !== 'Entregado' && o.status !== 'Rechazado').length;
+        const el = document.getElementById(`count-${l}`);
+        if (el) {
+          el.innerText = `${count} activas`;
+          if (count > 0) {
+            el.className = "text-xs px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black";
+          } else {
+            el.className = "text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-semibold";
+          }
+        }
+      });
+    }
+
+    function renderLineHistory() {
+      const container = document.getElementById('line-history-container');
+      if (!selectedLine) return;
+
+      const lineOrders = allOrders.filter(o => o.linea === selectedLine);
+      document.getElementById('line-history-count').innerText = `${lineOrders.length} solicitudes`;
+
+      if (lineOrders.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-8 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800/80">
+            <i class="fa-solid fa-inbox text-3xl mb-2 text-slate-600"></i>
+            <p class="text-sm">No hay solicitudes registradas para esta línea.</p>
+          </div>`;
+        return;
+      }
+
+      let html = '';
+      lineOrders.forEach(o => {
+        const badgeInfo = getStatusBadge(o.status);
+        html += `
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-lg">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">${o.linea}</span>
+                <span class="text-xs text-slate-400"><i class="fa-regular fa-clock mr-1"></i>${o.fechaStr || 'Reciente'}</span>
+                ${badgeInfo.html}
+              </div>
+              <h4 class="font-extrabold text-slate-100 text-base">${o.preset}</h4>
+              ${o.nota ? `<p class="text-xs text-slate-300 italic bg-slate-950/60 p-2 rounded-lg border border-slate-800"><i class="fa-solid fa-quote-left mr-1 text-amber-500"></i>${o.nota}</p>` : ''}
+            </div>
+
+            ${o.respuesta ? `
+              <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs text-slate-200 min-w-[200px]">
+                <span class="font-bold text-amber-400 block text-[10px] uppercase tracking-wider">Respuesta Materia Prima:</span>
+                <p class="mt-0.5">${o.respuesta}</p>
+              </div>
+            ` : `<div class="text-xs text-slate-500 italic flex items-center gap-1"><i class="fa-solid fa-hourglass-half text-amber-500/60 animate-pulse"></i> Esperando respuesta...</div>`}
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    function getStatusBadge(status) {
+      switch (status) {
+        case 'Pendiente':
+          return { html: `<span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span> Pendiente</span>` };
+        case 'En Camino':
+          return { html: `<span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1"><i class="fa-solid fa-truck-fast"></i> En Camino</span>` };
+        case 'Entregado':
+          return { html: `<span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1"><i class="fa-solid fa-circle-check"></i> Entregado</span>` };
+        case 'Rechazado':
+          return { html: `<span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-1"><i class="fa-solid fa-ban"></i> Rechazado</span>` };
+        default:
+          return { html: `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-800 text-slate-300">${status}</span>` };
+      }
+    }
+
+    function pressPin(digit) {
+      if (pinInputVal.length < 4) {
+        pinInputVal += digit;
+        document.getElementById('mp-pin-input').value = pinInputVal;
+      }
+      if (pinInputVal.length === 4) {
+        verifyPin();
+      }
+    }
+
+    function clearPin() {
+      pinInputVal = '';
+      document.getElementById('mp-pin-input').value = '';
+      document.getElementById('mp-auth-error').classList.add('hidden');
+    }
+
+    function verifyPin() {
+      if (pinInputVal === MP_CORRECT_PIN) {
+        isMpUnlocked = true;
+        document.getElementById('mp-auth-container').classList.add('hidden');
+        document.getElementById('mp-panel-container').classList.remove('hidden');
+        renderMpOrders();
+        showToast("Acceso concedido a Materia Prima", "success");
+      } else {
+        document.getElementById('mp-auth-error').classList.remove('hidden');
+        pinInputVal = '';
+        document.getElementById('mp-pin-input').value = '';
+      }
+    }
+
+    function lockMpPanel() {
+      isMpUnlocked = false;
+      pinInputVal = '';
+      document.getElementById('mp-pin-input').value = '';
+      document.getElementById('mp-auth-container').classList.remove('hidden');
+      document.getElementById('mp-panel-container').classList.add('hidden');
+    }
+
+    function setMpFilter(filterKey) {
+      mpFilter = filterKey;
+      document.querySelectorAll('.mp-filter-btn').forEach(btn => {
+        btn.className = "mp-filter-btn px-3.5 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition";
+      });
+      const activeBtn = document.getElementById(`filter-${filterKey}`);
+      if (activeBtn) {
+        activeBtn.className = "mp-filter-btn px-3.5 py-2 rounded-xl text-xs font-bold transition bg-amber-500 text-slate-950 shadow";
+      }
+      renderMpOrders();
+    }
+
+    function renderMpOrders() {
+      const container = document.getElementById('mp-orders-list');
+      const selectedLineFilter = document.getElementById('mp-line-select').value;
+
+      let filtered = [...allOrders];
+
+      if (selectedLineFilter !== 'ALL') {
+        filtered = filtered.filter(o => o.linea === selectedLineFilter);
+      }
+
+      if (mpFilter !== 'all') {
+        filtered = filtered.filter(o => o.status === mpFilter);
+      }
+
+      document.getElementById('mp-count-all').innerText = allOrders.length;
+      document.getElementById('mp-count-pending').innerText = allOrders.filter(o => o.status === 'Pendiente').length;
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-12 text-slate-500 bg-slate-900/50 rounded-2xl border border-slate-800">
+            <i class="fa-solid fa-clipboard-check text-4xl mb-3 text-slate-600"></i>
+            <p class="text-sm font-semibold">No hay solicitudes con este filtro.</p>
+          </div>`;
+        return;
+      }
+
+      let html = '';
+      filtered.forEach(o => {
+        const badgeInfo = getStatusBadge(o.status);
+        html += `
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div class="flex items-center gap-3">
+                <span class="text-lg font-black bg-amber-500 text-slate-950 px-3 py-1 rounded-xl shadow">${o.linea}</span>
+                <div>
+                  <h3 class="font-extrabold text-slate-100 text-base">${o.preset}</h3>
+                  <span class="text-xs text-slate-400"><i class="fa-regular fa-clock mr-1"></i>${o.fechaStr || 'Reciente'}</span>
+                </div>
+              </div>
+              <div>${badgeInfo.html}</div>
+            </div>
+
+            ${o.nota ? `
+              <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs text-slate-200">
+                <span class="font-bold text-amber-400 block text-[10px] uppercase tracking-wider">Aclaración:</span>
+                <p class="mt-0.5 text-slate-300 font-medium">${o.nota}</p>
+              </div>
+            ` : ''}
+
+            <div class="space-y-1.5">
+              <label class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Cambiar Estado:</label>
+              <div class="flex flex-wrap gap-2">
+                <button onclick="updateOrderStatus('${o.id}', 'En Camino')" class="px-3 py-1.5 rounded-xl text-xs font-bold ${o.status === 'En Camino' ? 'bg-blue-500 text-slate-950 font-black' : 'bg-slate-800 text-blue-400 border border-blue-500/30'} transition">
+                  <i class="fa-solid fa-truck-fast mr-1"></i> En Camino
+                </button>
+                <button onclick="updateOrderStatus('${o.id}', 'Entregado')" class="px-3 py-1.5 rounded-xl text-xs font-bold ${o.status === 'Entregado' ? 'bg-emerald-500 text-slate-950 font-black' : 'bg-slate-800 text-emerald-400 border border-emerald-500/30'} transition">
+                  <i class="fa-solid fa-check mr-1"></i> Entregado
+                </button>
+                <button onclick="updateOrderStatus('${o.id}', 'Rechazado')" class="px-3 py-1.5 rounded-xl text-xs font-bold ${o.status === 'Rechazado' ? 'bg-rose-500 text-slate-950 font-black' : 'bg-slate-800 text-rose-400 border border-rose-500/30'} transition">
+                  <i class="fa-solid fa-xmark mr-1"></i> Rechazar
+                </button>
+              </div>
+            </div>
+
+            <div class="space-y-2 pt-1 border-t border-slate-800">
+              <label class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Responder a ${o.linea}:</label>
+              
+              <div class="flex flex-wrap gap-1.5">
+                <button onclick="setResponseText('${o.id}', 'En camino en 5 minutos')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300">"En camino en 5 min"</button>
+                <button onclick="setResponseText('${o.id}', 'Insumo en preparación')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300">"Insumo en preparación"</button>
+                <button onclick="setResponseText('${o.id}', 'Sin stock momentáneo')" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300">"Sin stock"</button>
+              </div>
+
+              <div class="flex gap-2">
+                <input type="text" id="resp-input-${o.id}" value="${o.respuesta || ''}" placeholder="Escriba mensaje para la línea..." class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500">
+                <button onclick="sendOrderResponse('${o.id}')" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs transition flex items-center gap-1">
+                  <i class="fa-solid fa-paper-plane"></i>
+                  <span>Enviar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    function setResponseText(id, text) {
+      const input = document.getElementById(`resp-input-${id}`);
+      if (input) input.value = text;
+    }
+
+    function updateOrderStatus(id, newStatus) {
+      if (db && isConnected && !id.startsWith('local_')) {
+        db.collection('pedidos').doc(id).update({ status: newStatus })
+          .then(() => showToast(`Estado actualizado a: ${newStatus}`, "success"))
+          .catch(() => updateLocalOrderStatus(id, newStatus));
+      } else {
+        updateLocalOrderStatus(id, newStatus);
+      }
+    }
+
+    function updateLocalOrderStatus(id, newStatus) {
+      const target = allOrders.find(o => o.id === id);
+      if (target) {
+        target.status = newStatus;
+        saveFallbackData();
+        updateUI();
+        showToast(`Estado local actualizado`, "success");
+      }
+    }
+
+    function sendOrderResponse(id) {
+      const input = document.getElementById(`resp-input-${id}`);
+      const text = input ? input.value.trim() : '';
+
+      if (db && isConnected && !id.startsWith('local_')) {
+        db.collection('pedidos').doc(id).update({ respuesta: text })
+          .then(() => showToast("Respuesta enviada", "success"))
+          .catch(() => updateLocalResponse(id, text));
+      } else {
+        updateLocalResponse(id, text);
+      }
+    }
+
+    function updateLocalResponse(id, text) {
+      const target = allOrders.find(o => o.id === id);
+      if (target) {
+        target.respuesta = text;
+        saveFallbackData();
+        updateUI();
+        showToast("Respuesta guardada localmente", "success");
+      }
+    }
+
+    function updatePendingBadge() {
+      const pendingCount = allOrders.filter(o => o.status === 'Pendiente').length;
+      const counterEl = document.getElementById('pending-counter');
+      if (counterEl) {
+        if (pendingCount > 0) {
+          counterEl.innerText = pendingCount;
+          counterEl.classList.remove('hidden');
+        } else {
+          counterEl.classList.add('hidden');
+        }
+      }
+    }
+
+    function playFactoryAlert() {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const now = audioCtx.currentTime;
+
+        const osc1 = audioCtx.createOscillator();
+        const gain1 = audioCtx.createGain();
+        osc1.type = 'sawtooth';
+        osc1.frequency.setValueAtTime(523.25, now);
+        osc1.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+        gain1.gain.setValueAtTime(0.3, now);
+        gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc1.connect(gain1);
+        gain1.connect(audioCtx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.3);
+
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(659.25, now + 0.2);
+        gain2.gain.setValueAtTime(0.4, now + 0.2);
+        gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.start(now + 0.2);
+        osc2.stop(now + 0.6);
+      } catch(e) {
+        console.error("Audio error:", e);
+      }
+    }
+
+    function testAudioAlert() {
+      playFactoryAlert();
+      showToast("🔔 Alarma Sonora Reproducida", "info");
+    }
+
+    function openQrModal() {
+      const modal = document.getElementById('qr-modal');
+      modal.classList.remove('hidden');
+      
+      const currentUrl = window.location.href;
+      document.getElementById('qr-url-display').value = currentUrl;
+
+      const container = document.getElementById('qrcode-canvas');
+      container.innerHTML = '';
+
+      if (typeof QRCode !== 'undefined') {
+        new QRCode(container, {
+          text: currentUrl,
+          width: 180,
+          height: 180,
+          colorDark : "#0f172a",
+          colorLight : "#ffffff",
+          correctLevel : QRCode.CorrectLevel.H
+        });
+      }
+    }
+
+    function closeQrModal() {
+      document.getElementById('qr-modal').classList.add('hidden');
+    }
+
+    function copyAppUrl() {
+      const input = document.getElementById('qr-url-display');
+      input.select();
+      try {
+        document.execCommand('copy');
+        showToast("Enlace copiado", "success");
+      } catch (err) {
+        showToast("Error al copiar", "error");
+      }
+    }
+
+    function openRulesModal() {
+      document.getElementById('rules-modal').classList.remove('hidden');
+    }
+
+    function closeRulesModal() {
+      document.getElementById('rules-modal').classList.add('hidden');
+    }
+
+    function copyRulesSnippet() {
+      const snippet = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}`;
+      const tempInput = document.createElement('textarea');
+      tempInput.value = snippet;
+      document.body.appendChild(tempInput);
+      tempInput.select();
+      document.execCommand('copy');
+      document.body.removeChild(tempInput);
+      showToast("Regla copiada al portapapeles", "success");
+    }
+
+    function showToast(msg, type = "info") {
+      const toast = document.createElement('div');
+      let bgColor = "bg-slate-800 text-slate-100 border-slate-700";
+      if (type === "success") bgColor = "bg-emerald-500 text-slate-950 font-black";
+      if (type === "error") bgColor = "bg-rose-500 text-white font-bold";
+      if (type === "warning") bgColor = "bg-amber-500 text-slate-950 font-black";
+
+      toast.className = `fixed bottom-5 right-5 z-50 px-4 py-3 rounded-2xl border shadow-2xl text-xs flex items-center gap-2 transform transition-all duration-300 ${bgColor}`;
+      toast.innerHTML = `<i class="fa-solid fa-circle-info text-base"></i><span>${msg}</span>`;
+
+      document.body.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    window.onload = function() {
+      initFirebase();
+    };
+  </script>
+</body>
+</html>
